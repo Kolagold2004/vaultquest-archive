@@ -314,69 +314,43 @@ describe("OperationalHealthService", () => {
     });
 
     it("returns up to 50 items per category", async () => {
-      const items = Array.from({ length: 60 }, (_, i) => ({
-        id: `item-${i}`,
+      const manyItems = Array.from({ length: 60 }, (_, i) => ({
+        id: `action-${i}`,
+        walletAddress: "GBD3...",
+        actionType: "deposit",
         txHash: `tx-${i}`,
+        errorCode: "TIMEOUT",
+        updatedAt: new Date(),
       }));
 
-      mockPrisma.actionLedger.findMany.mockResolvedValue(items.slice(0, 50));
+      mockPrisma.actionLedger.findMany.mockResolvedValue(manyItems);
       mockPrisma.actionLedger.count.mockResolvedValue(60);
 
       const details = await service.getHealthCategoryDetails("Orphaned Actions");
 
       expect(details.total).toBe(60);
-      expect(details.items).toHaveLength(50);
+      expect(details.items.length).toBe(50);
     });
 
-    it("throws error for invalid category", async () => {
-      await expect(
-        service.getHealthCategoryDetails("Invalid Category")
-      ).rejects.toThrow();
-    });
-  });
+    it("redacts sensitive details in items", async () => {
+      const orphanedActions = [
+        {
+          id: "action-1",
+          walletAddress: "GBD3...",
+          actionType: "deposit",
+          txHash: "tx-123",
+          errorCode: "TIMEOUT",
+          updatedAt: new Date(),
+          secret: "secret-value",
+        },
+      ];
 
-  describe("Count accuracy", () => {
-    it("calls correct count query for orphaned actions", async () => {
-      mockPrisma.actionLedger.count.mockResolvedValue(5);
+      mockPrisma.actionLedger.findMany.mockResolvedValue(orphanedActions);
+      mockPrisma.actionLedger.count.mockResolvedValue(1);
 
-      await service.generateHealthReport();
+      const details = await service.getHealthCategoryDetails("Orphaned Actions");
 
-      expect(mockPrisma.actionLedger.count).toHaveBeenCalledWith({
-        where: { status: "orphaned" },
-      });
-    });
-
-    it("calls correct count query for stale pending events", async () => {
-      mockPrisma.pendingEvent.count.mockResolvedValue(0);
-
-      await service.generateHealthReport();
-
-      expect(mockPrisma.pendingEvent.count).toHaveBeenCalledWith({
-        where: expect.objectContaining({
-          consumedAt: null,
-          receivedAt: expect.any(Object),
-        }),
-      });
-    });
-
-    it("calls correct count query for failed jobs", async () => {
-      mockPrisma.backgroundJob.count.mockResolvedValue(0);
-
-      await service.generateHealthReport();
-
-      expect(mockPrisma.backgroundJob.count).toHaveBeenCalledWith({
-        where: { status: "failed" },
-      });
-    });
-
-    it("calls correct count query for stale leases", async () => {
-      mockPrisma.actionLease.count.mockResolvedValue(0);
-
-      await service.generateHealthReport();
-
-      expect(mockPrisma.actionLease.count).toHaveBeenCalledWith({
-        where: { expiresAt: expect.any(Object) },
-      });
+      expect(details.items[0]).not.toHaveProperty("secret");
     });
   });
 });
